@@ -1,0 +1,158 @@
+```py
+import time
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from webdriver_manager.chrome import ChromeDriverManager
+import pandas as pd
+import traceback
+
+# set up chrome option and driver
+options = webdriver.ChromeOptions()
+# locate the chrome driver location
+service = Service(r'C:\Users\DELL\Downloads\chromedriver-win64\chromedriver-win64\chromedriver.exe')
+driver = webdriver.Chrome(service=service, options=options)
+
+driver.maximize_window()  # maximize window
+driver.implicitly_wait(20)  # set implicit wait
+
+
+# define function to accept cookies
+def accept_cookies():
+    try:
+        accept_cookies_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+        )
+        accept_cookies_button.click()
+    except Exception as e:
+        print(f"Could not accept cookies: {e}")
+        pass
+
+
+# scraping function
+def get_data():
+    try:
+        driver.implicitly_wait(20)
+        # Wait until all matches are loaded
+        matches = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.CLASS_NAME, "Fixtures__FixtureItem-sc-199hb1h-9"))
+        )
+
+        for match in matches:
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, "Fixtures__FixtureItem-sc-199hb1h-9"))
+            )
+
+            time.sleep(1)
+            match.click()
+            driver.implicitly_wait(5)
+
+            # get the players stats window
+            window = match.find_element(By.CLASS_NAME, "Fixtures__FixtureStatsWrap-sc-199hb1h-12")
+            player_stats = window.find_elements(By.CLASS_NAME, "Tab__Item-sc-19t48gi-0")[1]
+            time.sleep(1)
+            player_stats.click()
+            time.sleep(1)
+
+            p_stats = window.find_elements(By.CLASS_NAME, "pillList__PillItem-sc-16qdzns-1")[1:]
+            # extract teams names
+            home_team = p_stats[0].text.strip()
+            away_team = p_stats[1].text.strip()
+
+            # loop through each team players stats
+            for stats in p_stats:
+                time.sleep(1)
+                stats.click()
+
+                time.sleep(1)
+                global columns, table_data
+
+                table = window.find_element(By.TAG_NAME, "table")
+
+                table_head = table.find_element(By.TAG_NAME, "thead")
+                # add the table header to columns list
+                if not columns:
+                    headers = table_head.find_elements(By.TAG_NAME, "th")[1:]
+                    columns = [headers[0].text.strip()] + ["position", "team", "opponent", "home"] + [h.text.strip() for
+                                                                                                      h in headers[1:]]
+
+                tbody = table.find_element(By.TAG_NAME, "tbody")
+                rows = tbody.find_elements(By.TAG_NAME, "tr")
+                # extract data from each row in the table
+                for row in rows:
+                    driver.implicitly_wait(5)
+                    player_data = []
+
+                    player_name = row.find_element(By.CLASS_NAME, "ElementInTable__Name-sc-y9xi40-1").text.strip()
+                    player_info = row.find_element(By.CLASS_NAME, "ElementInTable__Info-sc-y9xi40-2")
+                    player_pos = player_info.find_elements(By.TAG_NAME, "span")[1].text.strip()  # player position
+                    player_data.append(player_name)  # add player name to player_data list
+                    player_data.append(player_pos)  # add player position to player_data list
+                    player_data.append(home_team if stats == p_stats[0] else away_team)  # add team name to player_data
+                    player_data.append(away_team if stats == p_stats[0] else home_team)  # add opponent team name
+                    player_data.append(1 if stats == p_stats[0] else 0)  # specify home or away
+
+                    cells = row.find_elements(By.TAG_NAME, "td")[2:]
+                    # loop through each cell in the row & add the value to player_data list
+                    for cell in cells:
+                        driver.implicitly_wait(5)
+                        player_data.append(cell.text.strip())
+                    # add player data to table_data list
+                    if len(player_data) == len(columns):
+                        table_data.append(player_data)
+                    else:
+                        print(
+                            f"Warning: Row data length {len(player_data)} does not match column length {len(columns)}")
+
+                time.sleep(2)
+            # close match stats window
+            close_window = match.find_element(By.CLASS_NAME, "Fixtures__IconWrap-sc-199hb1h-11")
+            close_window.click()
+            time.sleep(1)
+            # scroll down
+            driver.execute_script("window.scrollBy(0, 85);")
+            time.sleep(1.7)
+        return True  # Return True if data is collected successfully
+
+    except Exception as e:
+        print(f"Error {e}")
+        return False  # Return False if there's an error
+
+
+columns = []
+table_data = []
+page = 0  # start from game week 1
+try:
+    while True:
+        driver.implicitly_wait(10)
+        page += 1  # go to the next game week page
+        url = f'https://fantasy.premierleague.com/fixtures/{page}'
+        print(f"Scraping page: {page}")
+        driver.get(url)
+        time.sleep(3)
+        # click accept cookies
+        accept_cookies()
+        # extract the data
+        if get_data():  # Continue only if data is collected
+            continue
+        else:
+            print(f"No data found for page {page}. Exiting loop.")
+            break  # Exit loop if no data is found
+
+    # create data frame & save it as csv file
+    pd.set_option('display.max_columns', None)  # display all columns
+    pd.set_option('display.expand_frame_repr', False)  # show all columns in one line
+    df = pd.DataFrame(table_data, columns=columns)  # create the data frame
+    print(df.to_string())
+    df.to_csv(r"C:\Users\DELL\Desktop\all_players.csv", index=False)  # save as csv file to the specified path
+
+except Exception as e:
+    print(f"Error found: {e}")
+    traceback.print_exc()
+
+finally:
+    driver.quit()  # close the browser
+```

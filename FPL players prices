@@ -1,0 +1,96 @@
+```py
+import time
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import pandas as pd
+
+options = webdriver.ChromeOptions()
+service = Service(r'C:\Users\DELL\Downloads\chromedriver-win64\chromedriver-win64\chromedriver.exe')
+driver = webdriver.Chrome(service=service, options=options)
+
+driver.maximize_window()
+
+
+def accept_cookies():
+    try:
+        accept_cookies_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
+        )
+        accept_cookies_button.click()
+    except Exception as e:
+        print(f"Could not accept cookies: {e}")
+        pass
+
+
+def get_data():
+    rows = driver.find_elements(By.CSS_SELECTOR, ".ElementTable__ElementRow-sc-1v08od9-3.kGMjuJ")
+    for row in rows:
+        player_name = row.find_element(By.CSS_SELECTOR, ".ElementInTable__Name-sc-y9xi40-1.WjUOj").text
+        i = row.find_elements(By.TAG_NAME, "td")[0]
+        fit = 1
+        try:
+            availability = i.find_element(By.CLASS_NAME, "ElementStatus__StyledStatus-sc-1bs5tgy-1")
+            if availability:
+                fit = 0
+        except:
+            pass
+
+        player_info = row.find_element(By.CLASS_NAME, "ElementInTable__Info-sc-y9xi40-2.bzDxAU")
+        player_pos = player_info.find_elements(By.TAG_NAME, "span")[1].text.strip()
+        cost = row.find_elements(By.TAG_NAME, "td")[2].text
+        total_pts = row.find_elements(By.TAG_NAME, "td")[5].text
+        players_stat.append(
+            {"Player": player_name, "position": player_pos, "cost": cost, "total_pts": total_pts, "fit": fit})
+        print(players_stat)
+
+
+def next_button():
+    try:
+        next_page = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//button[@class='PaginatorButton__Button-sc-xqlaki-0 cmSnxm']/span[contains(text(),'Next')]/..")))
+        if next_page.is_enabled() and next_page.is_displayed():
+            next_page.click()
+            time.sleep(2)
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Error pressing next: {e}")
+        return False
+
+
+players_stat = []
+
+try:
+    driver.implicitly_wait(4)
+    url = "https://fantasy.premierleague.com/statistics"
+    driver.get(url)
+    accept_cookies()
+    time.sleep(2)
+    get_data()
+    while next_button():
+        time.sleep(2)
+        get_data()
+
+    if players_stat:
+        df_players = pd.DataFrame(players_stat)
+
+        df_players = df_players.dropna()
+
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.expand_frame_repr', False)
+
+        print(df_players.to_string())
+        df_players.to_csv(r"C:\Users\DELL\Desktop\fpl_cost_total_pts.csv", index=False)
+
+except Exception as e:
+    print(f"Error: {e}")
+
+finally:
+    driver.quit()
+```

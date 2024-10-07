@@ -1,0 +1,231 @@
+```py
+import pandas as pd
+import numpy as np
+
+# table of all players data for every single match
+df = pd.read_csv(r"C:\Users\DELL\Desktop\all_players.csv")
+df = df[df["MP"] > 0]
+
+# fixtures table
+df_fixtures = pd.read_csv(r"C:\Users\DELL\Desktop\seventh_round.csv")
+
+# table of all players prices
+df_cost = pd.read_csv(r"C:\Users\DELL\Desktop\fpl_cost_total_pts.csv")
+df_cost = df_cost[df_cost["fit"] == 1]
+
+# split cost table by position
+gkp_cost = df_cost[df_cost["position"] == "GKP"]
+def_cost = df_cost[df_cost["position"] == "DEF"]
+mid_cost = df_cost[df_cost["position"] == "MID"]
+fwd_cost = df_cost[df_cost["position"] == "FWD"]
+
+
+df["contr"] = df["GS"] + df["A"]  # create a column of contributions (goals + assists)
+# split all players data table by position
+df_gkp = df[df["position"] == "GKP"]
+df_def = df[df["position"] == "DEF"]
+df_mid = df[df["position"] == "MID"]
+df_fwd = df[df["position"] == "FWD"]
+
+# create an aggregated table of midfielders grouped by player & team
+df_mid_contr = df_mid.groupby(["Player", "team", "position"])[["Pts", "MP", "contr", "xGI"]].aggregate({
+    "Pts": "mean", "MP": "mean", "contr": "sum", "xGI": "sum"
+}).reset_index()
+# calculate the conversion rate
+df_mid_contr["contr_conv_r"] = np.where(df_mid_contr["xGI"] != 0, df_mid_contr["contr"] / df_mid_contr["xGI"], 0)
+df_mid_contr = df_mid_contr[(df_mid_contr["MP"] > 30) & (df_mid_contr["xGI"] > 0.5)]  # apply some filtering
+df_mid_contr = df_mid_contr.sort_values(by="xGI", ascending=False).reset_index(drop=True)  # sorting
+#  merge df_mid_contr & mid_cost by "Player" & "position"
+df_mid_contr = pd.merge(df_mid_contr, mid_cost, on=["Player", "position"])
+df_mid_contr["Pts"] = df_mid_contr["Pts"].round(1)
+df_mid_contr["MP"] = df_mid_contr["MP"].astype(int)
+df_mid_contr["contr_conv_r"] = df_mid_contr["contr_conv_r"].round(2)
+
+# split midfielders into 3 price categories: low, medium, and high
+mid_low_cost = df_mid_contr[df_mid_contr["cost"] < 6].reset_index(drop=True)
+mid_med_cost = df_mid_contr[(df_mid_contr["cost"] >= 6) & (df_mid_contr["cost"] < 8)].reset_index(drop=True)
+mid_high_cost = df_mid_contr[df_mid_contr["cost"] >= 8].reset_index(drop=True)
+
+# create an aggregated table of forwards grouped by player & team
+df_fwd_contr = df_fwd.groupby(["Player", "team", "position"])[["Pts", "MP", "contr", "xGI"]].aggregate({
+    "Pts": "mean", "MP": "mean", "contr": "sum", "xGI": "sum"
+}).reset_index()
+# calculate the conversion rate
+df_fwd_contr["contr_conv_r"] = np.where(df_fwd_contr["xGI"] != 0, df_fwd_contr["contr"] / df_fwd_contr["xGI"], 0)
+df_fwd_contr = df_fwd_contr[df_fwd_contr["MP"] > 15]
+df_fwd_contr = df_fwd_contr.sort_values(by="contr_conv_r", ascending=False).reset_index(drop=True)
+df_fwd_contr = pd.merge(df_fwd_contr, fwd_cost, on=["Player", "position"])
+df_fwd_contr["Pts"] = df_fwd_contr["Pts"].round(1)
+df_fwd_contr["MP"] = df_fwd_contr["MP"].astype(int)
+df_fwd_contr["contr_conv_r"] = df_fwd_contr["contr_conv_r"].round(2)
+
+# split forwards into 3 price categories: low, medium, and high
+fwd_low_cost = df_fwd_contr[df_fwd_contr["cost"] < 6].reset_index(drop=True)
+fwd_med_cost = df_fwd_contr[(df_fwd_contr["cost"] >= 6) & (df_fwd_contr["cost"] < 8)].reset_index(drop=True)
+fwd_high_cost = df_fwd_contr[df_fwd_contr["cost"] >= 8].reset_index(drop=True)
+
+# create an aggregated table of defenders grouped by player & team
+df_def = df_def.groupby(["Player", "position", "team", ])[["Pts", "MP", "contr", "xGI", "CS", "GC", "xGC"]].aggregate({
+    "Pts": "mean", "MP": "mean", "contr": "sum", "xGI": "sum", "CS": "sum", "GC": "sum", "xGC": "sum"
+}).reset_index()
+df_def["gs_conv_r"] = df_def["contr"] / df_def["xGI"]
+df_def["gc_conv_r"] = df_def["GC"] / df_def["xGC"]
+df_def = df_def[(df_def["gc_conv_r"] < 0.9) & (df_def["MP"] >= 60) & (df_def["CS"] > 0)]
+df_def = df_def.sort_values(by="gs_conv_r", ascending=False).reset_index(drop=True)
+df_def = pd.merge(df_def, def_cost, on=["Player", "position"])
+df_def["Pts"] = df_def["Pts"].round(1)
+df_def["MP"] = df_def["MP"].astype(int)
+df_def["gc_conv_r"] = df_def["gc_conv_r"].round(2)
+
+# split defenders into 3 price categories: low, medium, and high
+def_low_cost = df_def[df_def["cost"] < 4.8].reset_index(drop=True)
+def_med_cost = df_def[(df_def["cost"] >= 4.8) & (df_def["cost"] < 5.6)].reset_index(drop=True)
+def_high_cost = df_def[df_def["cost"] >= 5.6].reset_index(drop=True)
+
+# create a table showing the total number of clean sheets, goals conceded, saves, and expected goals conceded,
+# grouped by team
+df_teams = df_gkp.groupby("team")[["CS", "GC", "S", "xGC"]].sum().reset_index()
+df_teams["conv_r"] = df_teams["GC"] / df_teams["xGC"]  # calculate the conversion rate
+df_teams = df_teams.sort_values(by="GC").reset_index(drop=True)
+
+# create a table showing the total number of goals scored & expected goals scoured, grouped by team
+df_att_teams = df.groupby("team")[["GS", "xG"]].sum().reset_index()
+df_att_teams["conv_r"] = df_att_teams["GS"] / df_att_teams["xG"]  # calculate the conversion rate
+df_att_teams = df_att_teams.sort_values(by="GS").reset_index(drop=True)
+
+# prepare fixtures DataFrame for merging by renaming columns
+rename_fixtures = df_fixtures.rename(columns={"team": "opponent", "opponent": "team"}).reset_index(drop=True)
+# merge the df_teams with the renamed fixtures DataFrame on the 'team' column
+df_teams = pd.merge(df_teams, rename_fixtures, on="team").reset_index(drop=True)
+df_att_teams = pd.merge(df_att_teams, rename_fixtures, on="team").reset_index(drop=True)
+
+# prepare df_teams & df_att_teams for merging by renaming columns
+rename_teams = df_teams.rename(columns={"team": "opponent", "opponent": "team"}).reset_index(drop=True)
+rename_att_teams = df_att_teams.rename(columns={"team": "opponent", "opponent": "team"}).reset_index(drop=True)
+
+# manipulate high-priced forwards' data:
+# contribution conversion rate > 1
+fwd_high_cost = fwd_high_cost[fwd_high_cost["contr_conv_r"] > 0].reset_index(drop=True)
+# filtering
+fwd_high_cost = fwd_high_cost[(fwd_high_cost["MP"] >= 60) | (fwd_high_cost["contr"] >= 4)].reset_index(drop=True)
+# create a new DataFrame for high-priced forwards by merging fwd_high_cost with rename_teams on 'team'
+high_fwd_pred = pd.merge(fwd_high_cost, rename_teams, on="team", how="left").reset_index(drop=True)
+# flip "home" column values: change 1 to 0 and 0 to 1
+high_fwd_pred["home"] = high_fwd_pred["home"].apply(lambda x: 1 if x == 0 else 0)
+# calculate predicted contributions
+high_fwd_pred["pred_contr"] = high_fwd_pred["contr_conv_r"] * high_fwd_pred["conv_r"]
+high_fwd_pred["conv_r"] = high_fwd_pred["conv_r"].round(2)
+high_fwd_pred["pred_contr"] = high_fwd_pred["pred_contr"].round(2)
+high_fwd_pred = high_fwd_pred.sort_values(by="pred_contr", ascending=False).reset_index(drop=True)  # sort
+high_fwd_pred = high_fwd_pred.drop(columns=["fit", "total_pts"])  # drop columns
+high_fwd_pred = high_fwd_pred.rename(
+    columns={"Pts": "avg_pts", "CS": "opp_CS", "GC": "opp_GC", "xGC": "opp_xGC", "conv_r": "opp_GC/opp_xGC"})  # rename
+print(high_fwd_pred.to_string(), "\n")
+
+# manipulate medium-priced forwards' data:
+fwd_med_cost = fwd_med_cost[fwd_med_cost["contr_conv_r"] > 0].reset_index(drop=True)
+fwd_med_cost = fwd_med_cost[(fwd_med_cost["MP"] >= 60) | (fwd_med_cost["contr"] >= 2)].reset_index(drop=True)
+med_fwd_pred = pd.merge(fwd_med_cost, rename_teams, on="team", how="left").reset_index(drop=True)
+med_fwd_pred["home"] = med_fwd_pred["home"].apply(lambda x: 1 if x == 0 else 0)
+# calculate predicted contributions
+med_fwd_pred["conv_r"] = med_fwd_pred["conv_r"].round(2)
+med_fwd_pred["pred_contr"] = med_fwd_pred["contr_conv_r"] * med_fwd_pred["conv_r"]
+med_fwd_pred["pred_contr"] = med_fwd_pred["pred_contr"].round(2)
+med_fwd_pred = med_fwd_pred.sort_values(by="pred_contr", ascending=False).reset_index(drop=True)
+med_fwd_pred = med_fwd_pred.drop(columns=["fit", "home", "total_pts"])
+med_fwd_pred = med_fwd_pred.rename(
+    columns={"Pts": "avg_pts", "CS": "opp_CS", "GC": "opp_GC", "xGC": "opp_xGC", "conv_r": "opp_GC/opp_xGC"})
+print(med_fwd_pred.to_string(), "\n")
+
+# manipulate low-priced forwards' data:
+fwd_low_cost = fwd_low_cost[fwd_low_cost["contr_conv_r"] > 0].reset_index(drop=True)
+fwd_low_cost = fwd_low_cost[(fwd_low_cost["MP"] >= 60) | (fwd_low_cost["contr"] >= 1)].reset_index(drop=True)
+low_fwd_pred = pd.merge(fwd_low_cost, rename_teams, on="team", how="left").reset_index(drop=True)
+low_fwd_pred["home"] = low_fwd_pred["home"].apply(lambda x: 1 if x == 0 else 0)
+# calculate predicted contributions
+low_fwd_pred["pred_contr"] = low_fwd_pred["contr_conv_r"] * low_fwd_pred["conv_r"]
+low_fwd_pred["conv_r"] = low_fwd_pred["conv_r"].round(2)
+low_fwd_pred["pred_contr"] = low_fwd_pred["pred_contr"].round(2)
+low_fwd_pred = low_fwd_pred.sort_values(by="pred_contr", ascending=False).reset_index(drop=True)
+low_fwd_pred = low_fwd_pred.drop(columns=["fit", "home", "total_pts"])
+low_fwd_pred = low_fwd_pred.rename(
+    columns={"Pts": "avg_pts", "CS": "opp_CS", "GC": "opp_GC", "xGC": "opp_xGC", "conv_r": "opp_GC/opp_xGC"})
+print(low_fwd_pred.to_string(), "\n")
+
+# manipulate high-priced midfielders' data:
+mid_high_cost = mid_high_cost[mid_high_cost["contr_conv_r"] > 0].reset_index(drop=True)
+mid_high_cost = mid_high_cost[(mid_high_cost["MP"] >= 60) | (mid_high_cost["contr"] >= 4)].reset_index(drop=True)
+high_mid_pred = pd.merge(mid_high_cost, rename_teams, on="team", how="left").reset_index(drop=True)
+# calculate predicted contributions
+high_mid_pred["pred_contr"] = high_mid_pred["contr_conv_r"] * high_mid_pred["conv_r"]
+high_mid_pred["conv_r"] = high_mid_pred["conv_r"].round(2)
+high_mid_pred["pred_contr"] = high_mid_pred["pred_contr"].round(2)
+high_mid_pred = high_mid_pred.sort_values(by="pred_contr", ascending=False).reset_index(drop=True)
+high_mid_pred = high_mid_pred.drop(columns=["fit", "total_pts"])
+high_mid_pred = high_mid_pred.rename(
+    columns={"Pts": "avg_pts", "CS": "opp_CS", "GC": "opp_GC", "xGC": "opp_xGC", "conv_r": "opp_GC/opp_xGC"})
+print(high_mid_pred.to_string(), "\n")
+
+# manipulate medium-priced midfielders' data:
+mid_med_cost = mid_med_cost[mid_med_cost["contr_conv_r"] > 0].reset_index(drop=True)
+mid_med_cost = mid_med_cost[(mid_med_cost["MP"] >= 60) | (mid_med_cost["contr"] >= 2)].reset_index(drop=True)
+med_mid_pred = pd.merge(mid_med_cost, rename_teams, on="team", how="left").reset_index(drop=True)
+# calculate predicted contributions
+med_mid_pred["pred_contr"] = med_mid_pred["contr_conv_r"] * med_mid_pred["conv_r"]
+med_mid_pred["conv_r"] = med_mid_pred["conv_r"].round(2)
+med_mid_pred["pred_contr"] = med_mid_pred["pred_contr"].round(2)
+med_mid_pred = med_mid_pred.sort_values(by="pred_contr", ascending=False).reset_index(drop=True)
+med_mid_pred = med_mid_pred.drop(columns=["fit", "total_pts"])
+med_mid_pred = med_mid_pred.rename(
+    columns={"Pts": "avg_pts", "CS": "opp_CS", "GC": "opp_GC", "xGC": "opp_xGC", "conv_r": "opp_GC/opp_xGC"})
+print(med_mid_pred.to_string(), "\n")
+
+# manipulate low-priced midfielders' data:
+mid_low_cost = mid_low_cost[mid_low_cost["contr_conv_r"] > 0].reset_index(drop=True)
+low_mid_pred = pd.merge(mid_low_cost, rename_teams, on="team", how="left").reset_index(drop=True)
+# calculate predicted contributions
+low_mid_pred["pred_contr"] = low_mid_pred["contr_conv_r"] * low_mid_pred["conv_r"]
+low_mid_pred["conv_r"] = low_mid_pred["conv_r"].round(2)
+low_mid_pred["pred_contr"] = low_mid_pred["pred_contr"].round(2)
+low_mid_pred = low_mid_pred.sort_values(by="pred_contr", ascending=False).reset_index(drop=True)
+low_mid_pred = low_mid_pred.drop(columns=["fit", "total_pts"])
+low_mid_pred = low_mid_pred.rename(
+    columns={"Pts": "avg_pts", "CS": "opp_CS", "GC": "opp_GC", "xGC": "opp_xGC", "conv_r": "opp_GC/opp_xGC"})
+print(low_mid_pred.to_string(), "\n")
+
+# manipulate high-priced defenders' data:
+high_def_pred = pd.merge(def_high_cost, rename_att_teams, on="team", how="left").reset_index(drop=True)
+# calculate predicted goals conceded
+high_def_pred["gs_conv_r"] = high_def_pred["gs_conv_r"].round(2)
+high_def_pred["conv_r"] = high_def_pred["conv_r"].round(2)
+high_def_pred["pred_gc"] = high_def_pred["gc_conv_r"] * high_def_pred["conv_r"]
+high_def_pred["pred_gc"] = high_def_pred["pred_gc"].round(2)
+high_def_pred = high_def_pred.sort_values(by="pred_gc").reset_index(drop=True)
+high_def_pred = high_def_pred.drop(columns=["fit", "total_pts"])
+high_def_pred = high_def_pred.rename(columns={"Pts": "avg_pts", "GS": "opp_GS", "xG": "opp_xG", "conv_r": "opp_GS/opp_xG"})
+print(high_def_pred.to_string(), "\n")
+
+# manipulate medium-priced defenders' data:
+med_def_pred = pd.merge(def_med_cost, rename_att_teams, on="team", how="left").reset_index(drop=True)
+# calculate predicted goals conceded
+med_def_pred["gs_conv_r"] = med_def_pred["gs_conv_r"].round(2)
+med_def_pred["conv_r"] = med_def_pred["conv_r"].round(2)
+med_def_pred["pred_gc"] = med_def_pred["gc_conv_r"] * med_def_pred["conv_r"]
+med_def_pred["pred_gc"] = med_def_pred["pred_gc"].round(2)
+med_def_pred = med_def_pred.sort_values(by="pred_gc").reset_index(drop=True)
+med_def_pred = med_def_pred.drop(columns=["fit", "total_pts"])
+med_def_pred = med_def_pred.rename(columns={"Pts": "avg_pts", "GS": "opp_GS", "xG": "opp_xG", "conv_r": "opp_GS/opp_xG"})
+print(med_def_pred.to_string(), "\n")
+
+# manipulate low-priced defenders' data:
+low_def_pred = pd.merge(def_low_cost, rename_att_teams, on="team", how="left").reset_index(drop=True)
+# calculate predicted goals conceded
+low_def_pred["gs_conv_r"] = low_def_pred["gs_conv_r"].round(2)
+low_def_pred["conv_r"] = low_def_pred["conv_r"].round(2)
+low_def_pred["pred_gc"] = low_def_pred["gc_conv_r"] * low_def_pred["conv_r"]
+low_def_pred["pred_gc"] = low_def_pred["pred_gc"].round(2)
+low_def_pred = low_def_pred.sort_values(by="pred_gc").reset_index(drop=True)
+low_def_pred = low_def_pred.drop(columns=["fit", "total_pts"])
+low_def_pred = low_def_pred.rename(columns={"Pts": "avg_pts", "GS": "opp_GS", "xG": "opp_xG", "conv_r": "opp_GS/opp_xG"})
+print(low_def_pred.to_string(), "\n")
+```
